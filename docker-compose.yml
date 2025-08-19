@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    networks:
+      - bigdata
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    environment:
+      - CLUSTER_NAME=hadoop-cluster
+    ports:
+      - "9870:9870"   # Web UI NameNode
+    volumes:
+      - hdfs-namenode:/hadoop/dfs/name
+    networks:
+      - bigdata
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+    ports:
+      - "9864:9864"   # Web UI DataNode
+    volumes:
+      - hdfs-datanode:/hadoop/dfs/data
+    networks:
+      - bigdata
+
+  hive-metastore-postgresql:
+    image: bde2020/hive-metastore-postgresql:2.3.0
+    container_name: hive-metastore-postgresql
+    environment:
+      - POSTGRES_PASSWORD=postgres
+    networks:
+      - bigdata
+
+  hive-metastore:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-metastore
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870 datanode:9864 hive-metastore-postgresql:5432
+    command: /opt/hive/bin/hive --service metastore
+    depends_on:
+      - hive-metastore-postgresql
+      - namenode
+      - datanode
+    ports:
+      - "9083:9083"   # Thrift Metastore
+    networks:
+      - bigdata
+
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-server
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870 datanode:9864 hive-metastore:9083
+      - HIVE_METASTORE_URI=thrift://hive-metastore:9083
+    command: /opt/hive/bin/hive --service hiveserver2
+    depends_on:
+      - hive-metastore
+    ports:
+      - "10000:10000" # JDBC HiveServer2
+    networks:
+      - bigdata
+
+  spark:
+    image: bitnami/spark:3.5
+    container_name: spark
+    environment:
+      - SPARK_MODE=client
+      - SPARK_NO_DAEMONIZE=yes
+    volumes:
+      - ./spark-app:/app
+      - ./jars:/jars
+    command: sleep infinity
+    depends_on:
+      - hive-server
+      - mysql
+    networks:
+      - bigdata
+    ports:
+      - "4040:4040"   # Spark UI khi chạy job
+
+volumes:
+  mysql-data:
+  hdfs-namenode:
+  hdfs-datanode:
+
+networks:
+  bigdata:
+
